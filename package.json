@@ -1,0 +1,25 @@
+{
+  "name": "comtradescope-native-electron",
+  "version": "0.1.0",
+  "description": "Native C++ backend plus Electron frontend COMTRADE fault recorder waveform viewer.",
+  "main": "src/main/main.js",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/run-electron.js --dev",
+    "start": "node scripts/run-electron.js",
+    "build:backend": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-backend.ps1",
+    "check": "node --check src/main/main.js && node --check src/main/preload.js && node --check src/renderer/renderer.js && node --check scripts/run-electron.js"
+  },
+  "keywords": [
+    "comtrade",
+    "fault-recorder",
+    "native-cpp",
+    "beast",
+    "electron"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^39.8.10"
+  }
+}

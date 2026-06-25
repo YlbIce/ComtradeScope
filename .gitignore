@@ -1,0 +1,17 @@
+node_modules/
+dist/
+release/
+backend/build/
+backend/build-*/
+backend/bin/
+.tmp/
+*.log
+*.user
+*.suo
+*.ninja
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.dSYM/

@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src ws://127.0.0.1:48010; img-src 'self' data:"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ComtradeScope</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <header class="brand">
+          <div class="brand-mark">CS</div>
+          <div>
+            <p>Native C++ Backend</p>
+            <h1>ComtradeScope</h1>
+          </div>
+        </header>
+
+        <nav class="nav" aria-label="功能页面">
+          <button class="nav-item active" data-page-target="page-waveform" type="button">波形分析</button>
+          <button class="nav-item" data-page-target="page-channels" type="button">通道与统计</button>
+          <button class="nav-item" data-page-target="page-events" type="button">数字事件</button>
+          <button class="nav-item" data-page-target="page-phasor" type="button">相量与序分量</button>
+          <button class="nav-item" data-page-target="page-report" type="button">报告导出</button>
+        </nav>
+
+        <section class="sidebar-card">
+          <div class="panel-title">
+            <span>后端</span>
+            <strong id="backendState">连接中</strong>
+          </div>
+          <button id="startBackendButton" class="secondary-button" type="button">启动后端</button>
+        </section>
+
+        <section class="sidebar-card">
+          <div class="panel-title">
+            <span>文件</span>
+            <strong id="fileState">未加载</strong>
+          </div>
+          <button id="openFileButton" class="primary-button" type="button">打开 COMTRADE</button>
+          <button id="loadDemoButton" type="button">加载示例录波</button>
+        </section>
+
+        <section class="sidebar-card">
+          <div class="panel-title">
+            <span>显示</span>
+            <strong id="selectedCount">0 通道</strong>
+          </div>
+          <button id="selectVoltageButton" type="button">只看电压</button>
+          <button id="selectCurrentButton" type="button">只看电流</button>
+          <button id="selectAllButton" type="button">显示全部</button>
+          <button id="resetViewButton" type="button">重置缩放与游标</button>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="pageEyebrow">COMTRADE / 故障录波 / 波形分析</p>
+            <h2 id="pageTitle">故障录波波形分析</h2>
+          </div>
+          <div class="status-strip">
+            <span id="connectionPill" class="state-pill offline">后端未连接</span>
+            <span id="sampleMetric">0 samples</span>
+            <span id="durationMetric">0 ms</span>
+            <span id="rateMetric">0 Hz</span>
+          </div>
+        </header>
+
+        <section class="metrics-grid">
+          <div class="metric-card">
+            <span>站点</span>
+            <strong id="stationMetric">-</strong>
+          </div>
+          <div class="metric-card">
+            <span>模拟通道</span>
+            <strong id="analogMetric">0</strong>
+          </div>
+          <div class="metric-card">
+            <span>数字通道</span>
+            <strong id="digitalMetric">0</strong>
+          </div>
+          <div class="metric-card">
+            <span>触发时刻</span>
+            <strong id="triggerMetric">-</strong>
+          </div>
+        </section>
+
+        <section id="page-waveform" class="page active" data-title="故障录波波形分析" data-eyebrow="COMTRADE / 故障录波 / 波形分析">
+          <div class="analysis-layout">
+            <section class="panel waveform-panel">
+              <header class="panel-header">
+                <span>波形浏览</span>
+                <div class="panel-actions">
+                  <label class="check-label"><input id="digitalOverlayCheck" type="checkbox" checked /> 数字量叠加</label>
+                  <button id="fitFaultButton" type="button">聚焦触发点</button>
+                </div>
+              </header>
+              <canvas id="waveCanvas" aria-label="故障录波波形"></canvas>
+              <div class="cursor-readout">
+                <span id="cursorAReadout">A: -</span>
+                <span id="cursorBReadout">B: -</span>
+                <span id="cursorDeltaReadout">Δt: -</span>
+              </div>
+            </section>
+
+            <aside class="side-stack">
+              <section class="panel">
+                <header class="panel-header">
+                  <span>通道选择</span>
+                  <button id="clearSelectionButton" type="button">清空</button>
+                </header>
+                <div id="channelList" class="channel-list"></div>
+              </section>
+
+              <section class="panel">
+                <header class="panel-header">
+                  <span>游标测量</span>
+                  <strong>单击/拖动设置游标</strong>
+                </header>
+                <dl id="cursorInspector" class="inspector"></dl>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <section id="page-channels" class="page" data-title="通道与统计" data-eyebrow="RMS / 峰值 / 基波 / THD">
+          <div class="page-grid">
+            <section class="panel">
+              <header class="panel-header">
+                <span>模拟通道统计</span>
+                <strong>全录波 + 末周期</strong>
+              </header>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>通道</th>
+                      <th>单位</th>
+                      <th>Min</th>
+                      <th>Max</th>
+                      <th>RMS</th>
+                      <th>基波 RMS</th>
+                      <th>相角</th>
+                      <th>2/3次 THD</th>
+                    </tr>
+                  </thead>
+                  <tbody id="statsTable"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="panel">
+              <header class="panel-header">
+                <span>COMTRADE 配置</span>
+                <strong id="formatBadge">-</strong>
+              </header>
+              <dl id="configInspector" class="inspector"></dl>
+            </section>
+          </div>
+        </section>
+
+        <section id="page-events" class="page" data-title="数字事件" data-eyebrow="开关量 / 保护动作 / 变位时序">
+          <div class="page-grid event-grid">
+            <section class="panel">
+              <header class="panel-header">
+                <span>数字量时序</span>
+                <strong id="eventCount">0 events</strong>
+              </header>
+              <canvas id="digitalCanvas" aria-label="数字量时序"></canvas>
+            </section>
+
+            <section class="panel">
+              <header class="panel-header">
+                <span>变位列表</span>
+                <button id="exportEventsButton" type="button">导出 CSV</button>
+              </header>
+              <div id="eventList" class="event-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="page-phasor" class="page" data-title="相量与序分量" data-eyebrow="基波相量 / 正序 / 负序 / 零序">
+          <div class="phasor-layout">
+            <section class="panel">
+              <header class="panel-header">
+                <span>相量图</span>
+                <strong>末周期基波估计</strong>
+              </header>
+              <canvas id="phasorCanvas" aria-label="相量图"></canvas>
+            </section>
+
+            <section class="panel">
+              <header class="panel-header">
+                <span>序分量</span>
+                <strong id="sequenceBadge">-</strong>
+              </header>
+              <dl id="sequenceInspector" class="inspector"></dl>
+            </section>
+
+            <section class="panel phasor-table-panel">
+              <header class="panel-header">
+                <span>相量表</span>
+                <strong>Magnitude / Angle</strong>
+              </header>
+              <div id="phasorList" class="phasor-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="page-report" class="page" data-title="报告导出" data-eyebrow="分析摘要 / 事件列表 / 工程交付">
+          <div class="page-grid">
+            <section class="panel">
+              <header class="panel-header">
+                <span>录波摘要报告</span>
+                <button id="exportReportButton" class="primary-button" type="button">导出 Markdown</button>
+              </header>
+              <textarea id="reportText" spellcheck="false"></textarea>
+            </section>
+
+            <section class="panel">
+              <header class="panel-header">
+                <span>能力说明</span>
+                <strong>MVP</strong>
+              </header>
+              <div class="help-copy">
+                <p>后端解析 COMTRADE 文件并计算核心电气量，前端负责交互、绘图和报告导出。</p>
+                <p>当前支持 CFG + DAT，覆盖 ASCII、Binary、Binary32、Float32 的基础读取；CFF、压缩文件和厂商私有扩展可在后端继续扩展。</p>
+                <p>适合故障录波查看、保护动作复盘、通道质量检查、数字量变位排查和报告初稿生成。</p>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="./renderer.js"></script>
+  </body>
+</html>
