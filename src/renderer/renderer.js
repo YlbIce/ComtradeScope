@@ -24,7 +24,8 @@ const state = {
   cursorA: null,
   cursorB: null,
   draggingCursor: null,
-  zoom: { start: 0, end: 1 }
+  zoom: { start: 0, end: 1 },
+  timeModel: null
 };
 
 function requestId() {
@@ -160,6 +161,7 @@ async function loadComtrade(cfgPath, datPath) {
 
 function applyRecord(payload) {
   state.record = payload;
+  state.timeModel = normalizeRecordTimes(payload);
   const analogCount = payload.waveform?.analogChannels?.length || 0;
   state.selectedAnalog = new Set(Array.from({ length: Math.min(analogCount, 6) }, (_, index) => index));
   state.cursorA = 0.25;
@@ -192,6 +194,48 @@ function renderMetrics() {
   $('#rateMetric').textContent = `${formatNumber(summary.sampleRate || 0)} Hz`;
   $('#formatBadge').textContent = `${summary.dataFileType || '-'} / ${summary.revisionYear || '-'}`;
   $('#selectedCount').textContent = `${state.selectedAnalog.size} 通道`;
+}
+
+function normalizeRecordTimes(record) {
+  const samples = record?.waveform?.samples || [];
+  if (samples.length === 0) {
+    return {
+      rawStart: 0,
+      rawEnd: 1,
+      rawDuration: 1,
+      triggerTime: 0,
+      useRelativeAxis: true,
+      sampleInterval: 1
+    };
+  }
+
+  const rawStart = Number(samples[0].time || 0);
+  let rawEnd = Number(samples.at(-1)?.time ?? rawStart);
+  if (!Number.isFinite(rawEnd) || rawEnd <= rawStart) {
+    rawEnd = rawStart + Math.max(1e-6, 1 / Math.max(1, record?.summary?.sampleRate || samples.length));
+  }
+
+  const rawDuration = Math.max(1e-9, rawEnd - rawStart);
+  const summary = record?.summary || {};
+  const parsedStart = parseComtradeDateTime(summary.startTime);
+  const parsedTrigger = parseComtradeDateTime(summary.triggerTime);
+  let triggerOffset = rawDuration / 2;
+  if (parsedStart && parsedTrigger) {
+    const offsetSeconds = (parsedTrigger.getTime() - parsedStart.getTime()) / 1000;
+    if (Number.isFinite(offsetSeconds) && offsetSeconds >= -rawDuration && offsetSeconds <= rawDuration * 2) {
+      triggerOffset = offsetSeconds;
+    }
+  }
+
+  const sampleInterval = rawDuration / Math.max(1, samples.length - 1);
+  return {
+    rawStart,
+    rawEnd,
+    rawDuration,
+    triggerTime: rawStart + triggerOffset,
+    useRelativeAxis: true,
+    sampleInterval
+  };
 }
 
 function renderChannels() {
@@ -255,7 +299,7 @@ function renderEvents() {
   $('#eventCount').textContent = `${events.length} events`;
   $('#eventList').innerHTML = events.length ? events.slice(0, 600).map((event) => `
     <div class="event-item ${event.edge}">
-      <span>${formatNumber(event.time * 1000)} ms</span>
+      <span>${formatAxisTime(event.time)}</span>
       <strong>${escapeHtml(event.channelId)}</strong>
       <small>${event.from} → ${event.to}</small>
     </div>
@@ -505,10 +549,13 @@ function drawCursor(ctx, plot, timeRange, cursor, color, label) {
 function drawAxis(ctx, plot, timeRange) {
   ctx.fillStyle = '#9aa7b4';
   ctx.font = '12px Segoe UI';
-  for (let i = 0; i <= 5; i += 1) {
-    const t = timeRange.start + (timeRange.end - timeRange.start) * (i / 5);
-    const x = plot.x + plot.width * (i / 5);
-    ctx.fillText(`${formatNumber(t * 1000)} ms`, x - 20, plot.y + plot.height + 22);
+  const tickCount = Math.max(2, Math.min(7, Math.floor(plot.width / 120)));
+  for (let i = 0; i <= tickCount; i += 1) {
+    const ratio = i / tickCount;
+    const t = timeRange.start + (timeRange.end - timeRange.start) * ratio;
+    const x = plot.x + plot.width * ratio;
+    const label = formatAxisTime(t);
+    ctx.fillText(label, x - Math.min(44, label.length * 3.5), plot.y + plot.height + 22);
   }
 }
 
@@ -560,17 +607,24 @@ function plotArea(rect, padding) {
 function visibleSamples() {
   const samples = state.record?.waveform?.samples || [];
   if (samples.length === 0) return [];
-  const startIndex = Math.floor(samples.length * state.zoom.start);
-  const endIndex = Math.max(startIndex + 1, Math.ceil(samples.length * state.zoom.end));
-  return samples.slice(startIndex, endIndex);
+  const normalized = normalizedZoom();
+  state.zoom = normalized;
+  const startIndex = Math.floor(clamp(Math.floor((samples.length - 1) * normalized.start), 0, samples.length - 1));
+  const endIndex = Math.ceil(clamp(Math.ceil((samples.length - 1) * normalized.end), startIndex + 1, samples.length));
+  const safeEndIndex = Math.min(samples.length, Math.max(endIndex, startIndex + 2));
+  return samples.slice(startIndex, safeEndIndex);
 }
 
 function visibleTimeRange(samples) {
-  if (!samples.length) return { start: 0, end: 1 };
-  return {
-    start: samples[0].time,
-    end: samples.at(-1).time || samples[0].time + 1e-6
-  };
+  const model = state.timeModel;
+  if (!samples.length || !model) return { start: 0, end: 1 };
+  const start = Number(samples[0].time || model.rawStart);
+  let end = Number(samples.at(-1)?.time ?? start);
+  const minSpan = Math.max(1e-9, model.sampleInterval || 1e-6);
+  if (!Number.isFinite(end) || end <= start) {
+    end = start + minSpan;
+  }
+  return { start, end: Math.max(end, start + minSpan) };
 }
 
 function timeToX(time, plot, range) {
@@ -610,8 +664,8 @@ function updateCursorReadout() {
   const range = visibleTimeRange(samples);
   const timeA = state.cursorA == null ? null : rangeTime(state.cursorA, range);
   const timeB = state.cursorB == null ? null : rangeTime(state.cursorB, range);
-  $('#cursorAReadout').textContent = `A: ${timeA == null ? '-' : `${formatNumber(timeA * 1000)} ms`}`;
-  $('#cursorBReadout').textContent = `B: ${timeB == null ? '-' : `${formatNumber(timeB * 1000)} ms`}`;
+  $('#cursorAReadout').textContent = `A: ${timeA == null ? '-' : formatAxisTime(timeA)}`;
+  $('#cursorBReadout').textContent = `B: ${timeB == null ? '-' : formatAxisTime(timeB)}`;
   $('#cursorDeltaReadout').textContent = `Δt: ${timeA == null || timeB == null ? '-' : `${formatNumber(Math.abs(timeB - timeA) * 1000)} ms`}`;
   $('#cursorInspector').innerHTML = buildCursorInspector(timeA, timeB);
 }
@@ -626,8 +680,8 @@ function buildCursorInspector(timeA, timeB) {
   const channels = state.record.waveform.analogChannels || [];
   const selected = Array.from(state.selectedAnalog).slice(0, 4);
   const rows = [
-    `<dt>A 时间</dt><dd>${formatNumber(nearestA.time * 1000)} ms</dd>`,
-    `<dt>B 时间</dt><dd>${formatNumber(nearestB.time * 1000)} ms</dd>`,
+    `<dt>A 时间</dt><dd>${formatAxisTime(nearestA.time)}</dd>`,
+    `<dt>B 时间</dt><dd>${formatAxisTime(nearestB.time)}</dd>`,
     `<dt>Δt</dt><dd>${formatNumber(Math.abs(nearestB.time - nearestA.time) * 1000)} ms</dd>`
   ];
   for (const index of selected) {
@@ -810,10 +864,11 @@ function bindEvents() {
     if (!state.record) return;
     event.preventDefault();
     const anchor = canvasNormalizedX(event, waveCanvas);
-    const currentSpan = state.zoom.end - state.zoom.start;
+    const currentZoom = normalizedZoom();
+    const currentSpan = currentZoom.end - currentZoom.start;
     const factor = event.deltaY < 0 ? 0.82 : 1.18;
-    const nextSpan = clamp(currentSpan * factor, 0.03, 1);
-    const center = state.zoom.start + currentSpan * anchor;
+    const nextSpan = clamp(currentSpan * factor, minZoomSpan(), 1);
+    const center = currentZoom.start + currentSpan * anchor;
     state.zoom.start = clamp(center - nextSpan * anchor, 0, 1 - nextSpan);
     state.zoom.end = state.zoom.start + nextSpan;
     updateCursorReadout();
@@ -823,6 +878,56 @@ function bindEvents() {
 function formatComplex(value) {
   if (!value) return '-';
   return `${formatNumber(value.magnitude)} ∠ ${formatNumber(value.angle)}°`;
+}
+
+function normalizedZoom() {
+  const minSpan = minZoomSpan();
+  let start = Number(state.zoom.start);
+  let end = Number(state.zoom.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+    start = 0;
+    end = 1;
+  }
+  start = clamp(start, 0, 1);
+  end = clamp(end, start + minSpan, 1);
+  if (end - start < minSpan) {
+    start = clamp(end - minSpan, 0, 1 - minSpan);
+    end = start + minSpan;
+  }
+  return { start, end };
+}
+
+function minZoomSpan() {
+  const samples = state.record?.waveform?.samples || [];
+  if (samples.length < 3) {
+    return 1;
+  }
+  // 极限缩放仍至少保留 3 个采样点，避免时间范围退化成单点。
+  return Math.min(1, Math.max(3 / Math.max(1, samples.length - 1), 0.0005));
+}
+
+function formatAxisTime(rawSeconds) {
+  const model = state.timeModel;
+  const value = Number(rawSeconds);
+  if (!Number.isFinite(value)) {
+    return '-';
+  }
+  const relativeSeconds = model?.useRelativeAxis ? value - model.triggerTime : value;
+  const abs = Math.abs(relativeSeconds);
+  const sign = relativeSeconds < -1e-12 ? 'T-' : 'T+';
+  if (abs < 1) {
+    return `${sign}${formatFixed(abs * 1000, abs < 0.01 ? 3 : 2)} ms`;
+  }
+  if (abs < 60) {
+    return `${sign}${formatFixed(abs, abs < 10 ? 3 : 2)} s`;
+  }
+  const minutes = Math.floor(abs / 60);
+  const seconds = abs - minutes * 60;
+  return `${sign}${minutes}:${formatFixed(seconds, 3).padStart(6, '0')}`;
+}
+
+function formatFixed(value, digits) {
+  return Number(value).toFixed(digits).replace(/\.?0+$/, '');
 }
 
 function formatNumber(value) {
@@ -850,6 +955,26 @@ function dateStamp() {
   const now = new Date();
   const pad = (value) => String(value).padStart(2, '0');
   return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+}
+
+function parseComtradeDateTime(value) {
+  const text = String(value || '').trim();
+  const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4}),(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d+))?$/.exec(text);
+  if (!match) {
+    return null;
+  }
+  const [, day, month, year, hour, minute, second, fraction = '0'] = match;
+  const ms = Number(`0.${fraction}`) * 1000;
+  const date = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+    Math.round(ms)
+  );
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function escapeHtml(value) {

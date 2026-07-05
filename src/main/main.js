@@ -5,16 +5,37 @@ const path = require('path');
 
 const WS_PORT = 48010;
 
+if (process.platform === 'win32') {
+  app.setPath('userData', path.join(app.getPath('appData'), 'ComtradeScope'));
+  app.commandLine.appendSwitch('disk-cache-dir', path.join(app.getPath('userData'), 'cache'));
+}
+
 let mainWindow = null;
 let backendProcess = null;
 let isQuitting = false;
+
+function resourcePath(...parts) {
+  const base = app.isPackaged ? process.resourcesPath : app.getAppPath();
+  return path.join(base, ...parts);
+}
+
+function sendToRenderer(channel, payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+  const { webContents } = mainWindow;
+  if (!webContents || webContents.isDestroyed()) {
+    return;
+  }
+  webContents.send(channel, payload);
+}
 
 function backendPath() {
   if (process.env.COMTRADESCOPE_BACKEND) {
     return process.env.COMTRADESCOPE_BACKEND;
   }
   const exe = process.platform === 'win32' ? 'comtradescope-backend.exe' : 'comtradescope-backend';
-  return path.join(app.getAppPath(), 'backend', 'bin', exe);
+  return resourcePath('backend', 'bin', exe);
 }
 
 function startBackend() {
@@ -37,18 +58,18 @@ function startBackend() {
   });
 
   backendProcess.stdout.on('data', (chunk) => {
-    mainWindow?.webContents.send('backend:log', chunk.toString('utf8'));
+    sendToRenderer('backend:log', chunk.toString('utf8'));
   });
 
   backendProcess.stderr.on('data', (chunk) => {
-    mainWindow?.webContents.send('backend:log', chunk.toString('utf8'));
+    sendToRenderer('backend:log', chunk.toString('utf8'));
   });
 
   backendProcess.on('exit', (code) => {
     backendProcess = null;
-    mainWindow?.webContents.send('backend:exit', code);
+    sendToRenderer('backend:exit', code);
     if (!isQuitting) {
-      mainWindow?.webContents.send('backend:log', `Native C++ 后端已退出，代码 ${code ?? 'unknown'}`);
+      sendToRenderer('backend:log', `Native C++ 后端已退出，代码 ${code ?? 'unknown'}`);
     }
   });
 
@@ -84,14 +105,18 @@ function createWindow() {
   if (process.env.ELECTRON_DEV === '1') {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 }
 
 ipcMain.handle('backend:info', () => ({
   wsUrl: `ws://127.0.0.1:${WS_PORT}`,
   backendPath: backendPath(),
   appPath: app.getAppPath(),
-  demoCfgPath: path.join(app.getAppPath(), 'samples', 'demo_fault.cfg'),
-  demoDatPath: path.join(app.getAppPath(), 'samples', 'demo_fault.dat')
+  demoCfgPath: resourcePath('samples', 'demo_fault.cfg'),
+  demoDatPath: resourcePath('samples', 'demo_fault.dat')
 }));
 
 ipcMain.handle('backend:start', () => startBackend());

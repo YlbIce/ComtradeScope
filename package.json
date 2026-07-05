@@ -8,7 +8,8 @@
     "dev": "node scripts/run-electron.js --dev",
     "start": "node scripts/run-electron.js",
     "build:backend": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-backend.ps1",
-    "check": "node --check src/main/main.js && node --check src/main/preload.js && node --check src/renderer/renderer.js && node --check scripts/run-electron.js"
+    "check": "node --check src/main/main.js && node --check src/main/preload.js && node --check src/renderer/renderer.js && node --check scripts/run-electron.js",
+    "dist": "npm run build:backend && npm run check && electron-builder --win nsis portable"
   },
   "keywords": [
     "comtrade",
@@ -20,6 +21,53 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^39.8.10"
+    "electron": "^39.8.10",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.local.comtradescope",
+    "productName": "ComtradeScope",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "package.json",
+      "src/**/*",
+      "README.md"
+    ],
+    "extraResources": [
+      {
+        "from": "backend/bin",
+        "to": "backend/bin",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "samples",
+        "to": "samples",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ComtradeScope"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}-${arch}.${ext}"
+    }
   }
 }
